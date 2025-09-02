@@ -1,0 +1,53 @@
+overwrite: true
+# Use Shopify Admin API schema via introspection
+schema:
+  - https://${SHOPIFY_STORE_DOMAIN}/admin/api/${SHOPIFY_API_VERSION}/graphql.json:
+      headers:
+        X-Shopify-Access-Token: ${SHOPIFY_API_ACCESS_TOKEN}
+        Content-Type: application/json
+documents:
+  - "lib/shopify/**/*.graphql"
+generates:
+  lib/shopify/types.ts:
+    plugins:
+      - typescript
+      - typescript-operations
+      - typed-document-node
+    config:
+      typesPrefix: "Shopify"
+      importIncludes: true
+      resolveFromLibrary: true
+      content: |
+        /* eslint-disable */
+        /* tslint:disable */
+        // @generated
+        // This file was automatically generated and should not be edited.
+      scalars:
+        Decimal: number
+        URL: string
+        HTML: string
+        DateTime: string
+        JSON: Record<string, unknown>
+        ARN: string
+        Money: string
+        UnsignedInt64: string
+        FormattedString: string
+        Color: string
+        ISO8601DateTime: string
+        BigInt: string
+        Date: string
+        StorefrontID: string
+        UtcOffset: string
+      documentMode: documentNode
+      addTypename: true
+      skipTypename: false
+      declarationKind: "interface"
+      enumsAsTypes: true
+      futureProofEnums: true
+      maybeValue: T | null
+      inputMaybeValue: T | null | undefined
+      strictScalars: true
+      avoidOptionals: false
+hooks:
+  afterOneFileWrite:
+    - prettier --write

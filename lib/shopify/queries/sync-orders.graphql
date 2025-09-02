@@ -1,0 +1,85 @@
+# Query for syncing orders - handles both initial and incremental sync
+# Use query parameter for filtering:
+# - Initial sync: "created_at:>=YYYY-MM-DD"
+# - Incremental sync: "updated_at:>=YYYY-MM-DD"
+query SyncOrders($first: Int!, $after: String, $query: String) {
+  orders(
+    first: $first
+    after: $after
+    query: $query
+    sortKey: UPDATED_AT
+    reverse: false
+  ) {
+    edges {
+      node {
+        id
+        legacyResourceId
+        name
+        createdAt
+        processedAt
+        updatedAt
+
+        # Financial fields
+        subtotalPriceSet {
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
+        totalPriceSet {
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
+        totalTaxSet {
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
+        totalDiscountsSet {
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
+        totalShippingPriceSet {
+          presentmentMoney {
+            amount
+            currencyCode
+          }
+        }
+
+        # Status and metadata
+        displayFinancialStatus
+        sourceName
+        channelInformation {
+          channelId
+          displayName
+        }
+        test
+
+        # Transactions for this order
+        transactions(first: 50) {
+          id
+          kind
+          status
+          amountSet {
+            presentmentMoney {
+              amount
+              currencyCode
+            }
+          }
+          processedAt
+          createdAt
+          gateway
+        }
+      }
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
