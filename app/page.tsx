@@ -7,10 +7,10 @@ export default function Home() {
       <div className="flex flex-col items-center space-y-6">
         <div className="text-center">
           <h1 className="text-4xl font-bold tracking-tight text-foreground sm:text-6xl">
-            Shopify Analytics
+            Venroy Analytics
           </h1>
           <p className="mt-6 text-lg leading-8 text-muted-foreground">
-            Private analytics dashboard for your Shopify store
+            Private analytics dashboard for Venroy&apos;s Shopify store
           </p>
         </div>
 

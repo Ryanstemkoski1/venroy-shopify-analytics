@@ -1,6 +1,6 @@
-# Shopify Analytics Dashboard
+# Venroy Analytics Dashboard
 
-A private analytics dashboard for Shopify stores built with Next.js, TypeScript, and Supabase authentication. Features accurate transaction-level analytics through a comprehensive database synchronization system.
+A private analytics dashboard for Venroy's Shopify store built with Next.js, TypeScript, and Supabase authentication. Features accurate transaction-level analytics through a comprehensive database synchronization system.
 
 ## Features
 
@@ -17,7 +17,7 @@ A private analytics dashboard for Shopify stores built with Next.js, TypeScript,
 
    ```bash
    git clone <repository-url>
-   cd shopify-analytics
+   cd venroy-shopify-analytics
    npm install
    ```
 
