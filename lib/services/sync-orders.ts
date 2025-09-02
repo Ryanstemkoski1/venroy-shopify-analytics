@@ -146,16 +146,11 @@ export async function syncOrders(): Promise<SyncResult> {
       hasNextPage = response.orders.pageInfo.hasNextPage
       cursor = response.orders.pageInfo.endCursor || undefined
 
-      // Save cursor progress and update last_sync_at to current time for resumption
+      // Save cursor progress
       await updateSyncState("orders", {
         last_cursor: cursor,
         sync_status: "running",
-        last_sync_at: new Date().toISOString(),
       })
-
-      console.log(
-        `💾 Saved progress: cursor ${cursor ? cursor.slice(-8) : "null"}, ${totalOrders} orders processed`
-      )
 
       // Small delay to be respectful to Shopify API
       await new Promise((resolve) => setTimeout(resolve, 100))
@@ -287,16 +282,11 @@ async function performInitialSync(): Promise<SyncResult> {
       hasNextPage = response.orders.pageInfo.hasNextPage
       cursor = response.orders.pageInfo.endCursor || undefined
 
-      // Save cursor progress and update last_sync_at to current time for resumption
+      // Save cursor progress
       await updateSyncState("orders", {
         last_cursor: cursor,
         sync_status: "running",
-        last_sync_at: new Date().toISOString(),
       })
-
-      console.log(
-        `💾 Saved progress: cursor ${cursor ? cursor.slice(-8) : "null"}, ${totalOrders} orders processed`
-      )
 
       // Small delay to be respectful to Shopify API
       await new Promise((resolve) => setTimeout(resolve, 100))
