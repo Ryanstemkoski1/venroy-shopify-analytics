@@ -230,16 +230,17 @@ export async function getChannelAnalytics(
 export async function getLastUpdatedAt(): Promise<string | null> {
   const supabase = await createClient()
 
+  // Get the last successful sync timestamp from sync_state table
   const { data, error } = await supabase
-    .from("orders")
-    .select("updated_at")
-    .order("updated_at", { ascending: false })
-    .limit(1)
+    .from("sync_state")
+    .select("last_sync_at")
+    .eq("entity_type", "orders")
+    .eq("sync_status", "completed")
     .single()
 
   if (error || !data) {
     return null
   }
 
-  return data.updated_at
+  return data.last_sync_at
 }
