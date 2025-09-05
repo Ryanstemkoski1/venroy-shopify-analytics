@@ -11,6 +11,7 @@ import { SalesChannelTable } from "@/components/modules/sales-channel-table"
 import { getDateRangeFromParams, formatCurrency } from "@/lib/utils"
 import { getSalesByChannel } from "@/lib/services/get-sales-by-channel"
 import { format } from "date-fns"
+import { IndividualOrdersSection } from "@/components/modules/individual-orders-section"
 
 interface PageProps {
   searchParams: Promise<{ [key: string]: string | string[] | undefined }>
@@ -156,6 +157,9 @@ export default async function NetSalesByChannelPage({
               />
             </CardContent>
           </Card>
+
+          {/* Individual Orders Section */}
+          <IndividualOrdersSection dateRange={dateRange} />
         </div>
       ) : (
         <Card>
