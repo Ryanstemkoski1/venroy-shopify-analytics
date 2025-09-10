@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
-import { format, isValid, parseISO } from "date-fns"
+import { format, isValid } from "date-fns"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -31,7 +31,8 @@ export function getDateRangeFromParams(
   // Parse from parameter
   if (fromParam) {
     try {
-      const parsedFrom = parseISO(fromParam)
+      // Parse as local date to avoid timezone issues
+      const parsedFrom = new Date(fromParam + "T00:00:00")
       if (isValid(parsedFrom)) {
         from = parsedFrom
         from.setHours(0, 0, 0, 0)
@@ -44,7 +45,8 @@ export function getDateRangeFromParams(
   // Parse to parameter
   if (toParam) {
     try {
-      const parsedTo = parseISO(toParam)
+      // Parse as local date to avoid timezone issues
+      const parsedTo = new Date(toParam + "T23:59:59")
       if (isValid(parsedTo)) {
         to = parsedTo
         to.setHours(23, 59, 59, 999)

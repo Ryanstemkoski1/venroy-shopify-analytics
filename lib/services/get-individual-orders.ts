@@ -164,6 +164,9 @@ export async function getIndividualOrders(
     // Get unique order IDs from transactions
     const orderIds = [...new Set(allTransactions.map((t) => t.order_id))]
 
+    console.log(`📊 Debug: Total transactions: ${allTransactions.length}`)
+    console.log(`📊 Debug: Unique order IDs: ${orderIds.length}`)
+
     // Get total count for pagination
     const totalCount = orderIds.length
     const totalPages = Math.ceil(totalCount / pageSize)

@@ -30,10 +30,19 @@ export async function exportOrdersAction(fromDate: string, toDate: string) {
     const allOrders = await getAllIndividualOrdersForExport(fromDate, toDate)
     const csvContent = generateOrdersCSV(allOrders)
 
+    // Format dates for filename (extract just the date part)
+    const formatDateForFilename = (dateStr: string) => {
+      // Extract date part from ISO string or return as-is if already date format
+      return dateStr.includes("T") ? dateStr.split("T")[0] : dateStr
+    }
+
+    const formattedFromDate = formatDateForFilename(fromDate)
+    const formattedToDate = formatDateForFilename(toDate)
+
     return {
       success: true,
       csvContent,
-      filename: `venroy-orders-${fromDate}-to-${toDate}-all.csv`,
+      filename: `venroy-orders-${formattedFromDate}-to-${formattedToDate}-all.csv`,
     }
   } catch (error) {
     console.error("Failed to export orders:", error)
