@@ -18,22 +18,13 @@ import {
 } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
 import { formatCurrency } from "@/lib/utils"
-import { Package, Eye, ChevronLeft, ChevronRight, Download } from "lucide-react"
+import { Package, Download, ChevronLeft, ChevronRight } from "lucide-react"
+import { type IndividualOrdersResponse } from "@/lib/services/get-individual-orders"
 import {
-  getIndividualOrders,
-  generateOrdersCSV,
-  type IndividualOrderData,
-  type IndividualOrdersResponse,
-} from "@/lib/services/get-individual-orders"
+  fetchIndividualOrdersAction,
+  exportOrdersAction,
+} from "@/lib/actions/individual-orders-actions"
 import { format } from "date-fns"
 
 interface IndividualOrdersSectionProps {
@@ -47,26 +38,30 @@ export function IndividualOrdersSection({
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
-  const [selectedOrder, setSelectedOrder] =
-    useState<IndividualOrderData | null>(null)
   const [isExporting, setIsExporting] = useState(false)
 
   const fromDate = format(dateRange.from, "yyyy-MM-dd")
   const toDate = format(dateRange.to, "yyyy-MM-dd")
 
+  // Fetch data using server action
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
         setError(null)
 
-        const result = await getIndividualOrders(
+        const result = await fetchIndividualOrdersAction(
           fromDate,
           toDate,
           currentPage,
           50
         )
-        setData(result)
+
+        if (result.success && result.data) {
+          setData(result.data)
+        } else {
+          setError(result.error || "Failed to fetch orders")
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Unknown error")
       } finally {
@@ -77,26 +72,27 @@ export function IndividualOrdersSection({
     fetchData()
   }, [fromDate, toDate, currentPage])
 
+  // Export functionality using server action
   const handleExport = async () => {
     try {
       setIsExporting(true)
 
-      // Get all orders for export
-      const allOrders = await getIndividualOrders(fromDate, toDate, 1, 10000)
+      const result = await exportOrdersAction(fromDate, toDate)
 
-      // Generate CSV
-      const csvContent = generateOrdersCSV(allOrders.orders)
-
-      // Create download
-      const blob = new Blob([csvContent], { type: "text/csv" })
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = `venroy-orders-${fromDate}-to-${toDate}.csv`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      if (result.success && result.csvContent && result.filename) {
+        // Create download
+        const blob = new Blob([result.csvContent], { type: "text/csv" })
+        const url = window.URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = url
+        link.download = result.filename
+        document.body.appendChild(link)
+        link.click()
+        document.body.removeChild(link)
+        window.URL.revokeObjectURL(url)
+      } else {
+        alert(`Export failed: ${result.error}`)
+      }
     } catch (error) {
       console.error("Export failed:", error)
       alert("Failed to export data. Please try again.")
@@ -122,41 +118,6 @@ export function IndividualOrdersSection({
     return (
       <Badge variant="secondary" className={color}>
         {status || "Unknown"}
-      </Badge>
-    )
-  }
-
-  const getTransactionKindBadge = (kind: string) => {
-    const colorMap: Record<string, string> = {
-      sale: "bg-green-100 text-green-800",
-      refund: "bg-red-100 text-red-800",
-      capture: "bg-blue-100 text-blue-800",
-      authorization: "bg-purple-100 text-purple-800",
-      void: "bg-gray-100 text-gray-800",
-    }
-
-    const color = colorMap[kind.toLowerCase()] || "bg-gray-100 text-gray-800"
-
-    return (
-      <Badge variant="secondary" className={color}>
-        {kind}
-      </Badge>
-    )
-  }
-
-  const getTransactionStatusBadge = (status: string) => {
-    const colorMap: Record<string, string> = {
-      success: "bg-green-100 text-green-800",
-      pending: "bg-yellow-100 text-yellow-800",
-      failure: "bg-red-100 text-red-800",
-      error: "bg-red-100 text-red-800",
-    }
-
-    const color = colorMap[status.toLowerCase()] || "bg-gray-100 text-gray-800"
-
-    return (
-      <Badge variant="secondary" className={color}>
-        {status}
       </Badge>
     )
   }
@@ -201,34 +162,46 @@ export function IndividualOrdersSection({
 
     return (
       <div className="space-y-4">
-        {/* Export Button and Summary */}
+        {/* Summary and Export */}
         <div className="flex justify-between items-start gap-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 flex-1">
             <div className="bg-blue-50 p-3 rounded-lg">
               <p className="text-xs text-blue-600 font-medium">Total Orders</p>
               <p className="text-lg font-bold text-blue-900">
-                {data.summary.totalOrders}
+                {data.summary?.totalOrders || 0}
               </p>
             </div>
             <div className="bg-green-50 p-3 rounded-lg">
               <p className="text-xs text-green-600 font-medium">Total Sales</p>
               <p className="text-lg font-bold text-green-900">
-                {formatCurrency(data.summary.totalSales, data.summary.currency)}
+                {data.summary?.totalSales
+                  ? formatCurrency(
+                      data.summary.totalSales,
+                      data.summary.currency || "USD"
+                    )
+                  : "$0.00"}
               </p>
             </div>
             <div className="bg-red-50 p-3 rounded-lg">
               <p className="text-xs text-red-600 font-medium">Total Refunds</p>
               <p className="text-lg font-bold text-red-900">
-                {formatCurrency(
-                  data.summary.totalRefunds,
-                  data.summary.currency
-                )}
+                {data.summary?.totalRefunds
+                  ? formatCurrency(
+                      data.summary.totalRefunds,
+                      data.summary.currency || "USD"
+                    )
+                  : "$0.00"}
               </p>
             </div>
             <div className="bg-purple-50 p-3 rounded-lg">
               <p className="text-xs text-purple-600 font-medium">Net Amount</p>
               <p className="text-lg font-bold text-purple-900">
-                {formatCurrency(data.summary.totalNet, data.summary.currency)}
+                {data.summary?.totalNet
+                  ? formatCurrency(
+                      data.summary.totalNet,
+                      data.summary.currency || "USD"
+                    )
+                  : "$0.00"}
               </p>
             </div>
           </div>
@@ -262,10 +235,9 @@ export function IndividualOrdersSection({
                 <TableHead>Date</TableHead>
                 <TableHead>Channel</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="text-right">Total Amount</TableHead>
-                <TableHead className="text-right">Net Sales</TableHead>
+                <TableHead className="text-right">Total Sales</TableHead>
+                <TableHead className="text-right">Net Amount</TableHead>
                 <TableHead className="text-center">Transactions</TableHead>
-                <TableHead className="text-center">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -311,12 +283,9 @@ export function IndividualOrdersSection({
                     {getStatusBadge(order.financial_status)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatCurrency(order.total_amount, order.currency)}
-                  </TableCell>
-                  <TableCell className="text-right">
                     <div>
                       <p className="font-semibold">
-                        {formatCurrency(order.net_amount, order.currency)}
+                        {formatCurrency(order.total_sales, order.currency)}
                       </p>
                       {order.total_refunds > 0 && (
                         <p className="text-sm text-red-600">
@@ -326,184 +295,11 @@ export function IndividualOrdersSection({
                       )}
                     </div>
                   </TableCell>
-                  <TableCell className="text-center">
-                    <Badge variant="outline">{order.transaction_count}</Badge>
+                  <TableCell className="text-right">
+                    {formatCurrency(order.net_amount, order.currency)}
                   </TableCell>
                   <TableCell className="text-center">
-                    <Dialog>
-                      <DialogTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedOrder(order)}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          Details
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
-                        <DialogHeader>
-                          <DialogTitle>Order Details: {order.name}</DialogTitle>
-                          <DialogDescription>
-                            Detailed transaction information for troubleshooting
-                          </DialogDescription>
-                        </DialogHeader>
-                        {selectedOrder && (
-                          <div className="space-y-6">
-                            {/* Order Summary */}
-                            <div className="grid grid-cols-2 gap-4">
-                              <div>
-                                <h4 className="font-semibold mb-2">
-                                  Order Information
-                                </h4>
-                                <div className="space-y-2 text-sm">
-                                  <p>
-                                    <strong>Order ID:</strong>{" "}
-                                    {selectedOrder.shopify_order_id}
-                                  </p>
-                                  <p>
-                                    <strong>Name:</strong> {selectedOrder.name}
-                                  </p>
-                                  <p>
-                                    <strong>Created:</strong>{" "}
-                                    {new Date(
-                                      selectedOrder.created_at
-                                    ).toLocaleString()}
-                                  </p>
-                                  <p>
-                                    <strong>Processed:</strong>{" "}
-                                    {selectedOrder.processed_at
-                                      ? new Date(
-                                          selectedOrder.processed_at
-                                        ).toLocaleString()
-                                      : "Not processed"}
-                                  </p>
-                                  <p>
-                                    <strong>Channel:</strong>{" "}
-                                    {selectedOrder.channel_display_name ||
-                                      selectedOrder.source_name ||
-                                      "Unknown"}
-                                  </p>
-                                  <p>
-                                    <strong>Status:</strong>{" "}
-                                    {selectedOrder.financial_status ||
-                                      "Unknown"}
-                                  </p>
-                                </div>
-                              </div>
-                              <div>
-                                <h4 className="font-semibold mb-2">
-                                  Financial Summary
-                                </h4>
-                                <div className="space-y-2 text-sm">
-                                  <p>
-                                    <strong>Subtotal:</strong>{" "}
-                                    {formatCurrency(
-                                      selectedOrder.subtotal_amount,
-                                      selectedOrder.currency
-                                    )}
-                                  </p>
-                                  <p>
-                                    <strong>Tax:</strong>{" "}
-                                    {formatCurrency(
-                                      selectedOrder.total_tax_amount,
-                                      selectedOrder.currency
-                                    )}
-                                  </p>
-                                  <p>
-                                    <strong>Shipping:</strong>{" "}
-                                    {formatCurrency(
-                                      selectedOrder.total_shipping_amount,
-                                      selectedOrder.currency
-                                    )}
-                                  </p>
-                                  <p>
-                                    <strong>Discounts:</strong>{" "}
-                                    {formatCurrency(
-                                      selectedOrder.total_discounts_amount,
-                                      selectedOrder.currency
-                                    )}
-                                  </p>
-                                  <p>
-                                    <strong>Total:</strong>{" "}
-                                    {formatCurrency(
-                                      selectedOrder.total_amount,
-                                      selectedOrder.currency
-                                    )}
-                                  </p>
-                                  <p>
-                                    <strong>Net Sales:</strong>{" "}
-                                    <span className="font-semibold">
-                                      {formatCurrency(
-                                        selectedOrder.net_amount,
-                                        selectedOrder.currency
-                                      )}
-                                    </span>
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Transactions */}
-                            <div>
-                              <h4 className="font-semibold mb-4">
-                                Transactions (
-                                {selectedOrder.transactions.length})
-                              </h4>
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead>ID</TableHead>
-                                    <TableHead>Kind</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Amount</TableHead>
-                                    <TableHead>Gateway</TableHead>
-                                    <TableHead>Processed</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {selectedOrder.transactions.map(
-                                    (transaction) => (
-                                      <TableRow key={transaction.id}>
-                                        <TableCell className="font-mono text-xs">
-                                          {transaction.shopify_transaction_id.slice(
-                                            -8
-                                          )}
-                                        </TableCell>
-                                        <TableCell>
-                                          {getTransactionKindBadge(
-                                            transaction.kind
-                                          )}
-                                        </TableCell>
-                                        <TableCell>
-                                          {getTransactionStatusBadge(
-                                            transaction.status
-                                          )}
-                                        </TableCell>
-                                        <TableCell>
-                                          {formatCurrency(
-                                            transaction.amount,
-                                            transaction.currency
-                                          )}
-                                        </TableCell>
-                                        <TableCell>
-                                          {transaction.gateway || "N/A"}
-                                        </TableCell>
-                                        <TableCell>
-                                          {new Date(
-                                            transaction.processed_at
-                                          ).toLocaleString()}
-                                        </TableCell>
-                                      </TableRow>
-                                    )
-                                  )}
-                                </TableBody>
-                              </Table>
-                            </div>
-                          </div>
-                        )}
-                      </DialogContent>
-                    </Dialog>
+                    <Badge variant="outline">{order.transaction_count}</Badge>
                   </TableCell>
                 </TableRow>
               ))}
@@ -523,6 +319,7 @@ export function IndividualOrdersSection({
               )}{" "}
               of {data.pagination.totalCount} orders
             </p>
+
             <div className="flex items-center space-x-2">
               <Button
                 variant="outline"
@@ -560,8 +357,7 @@ export function IndividualOrdersSection({
           Individual Orders
         </CardTitle>
         <CardDescription>
-          View individual order records with transaction details for
-          troubleshooting data discrepancies
+          View individual order records for troubleshooting data discrepancies
         </CardDescription>
       </CardHeader>
       <CardContent>{renderContent()}</CardContent>

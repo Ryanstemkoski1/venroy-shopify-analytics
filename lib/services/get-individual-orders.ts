@@ -6,6 +6,7 @@
  */
 
 import { createClient } from "../supabase/server"
+import type { DatabaseTransaction } from "../supabase/types"
 
 export interface IndividualOrderData {
   // Order information
@@ -82,33 +83,74 @@ export async function getIndividualOrders(
       ? toDate
       : `${toDate}T23:59:59.999Z`
 
-    // Get transactions within date range first (following existing pattern)
-    const { data: transactions, error: transactionsError } = await supabase
-      .from("transactions")
-      .select(
-        `
-        order_id,
-        kind,
-        status,
-        amount,
-        currency,
-        processed_at,
-        created_at,
-        gateway,
-        id,
-        shopify_transaction_id
-      `
-      )
-      .gte("processed_at", fromDate)
-      .lte("processed_at", toDateEndOfDay)
-      .order("processed_at", { ascending: false })
+    // Query transactions within date range with pagination to get ALL transactions
+    const transactionPageSize = 1000
+    let transactionPage = 1
+    let hasMoreTransactions = true
+    const allTransactions: Pick<
+      DatabaseTransaction,
+      | "order_id"
+      | "kind"
+      | "status"
+      | "amount"
+      | "currency"
+      | "processed_at"
+      | "created_at"
+      | "gateway"
+      | "id"
+      | "shopify_transaction_id"
+    >[] = []
 
-    if (transactionsError) {
-      console.error("❌ Transactions query error:", transactionsError)
-      throw new Error(`Transactions query failed: ${transactionsError.message}`)
+    while (hasMoreTransactions) {
+      const { data: pageData, error: transactionsError } = await supabase
+        .from("transactions")
+        .select(
+          `
+          order_id,
+          kind,
+          status,
+          amount,
+          currency,
+          processed_at,
+          created_at,
+          gateway,
+          id,
+          shopify_transaction_id
+        `
+        )
+        .gte("processed_at", fromDate)
+        .lte("processed_at", toDateEndOfDay)
+        .order("processed_at", { ascending: false })
+        .range(
+          (transactionPage - 1) * transactionPageSize,
+          transactionPage * transactionPageSize - 1
+        )
+
+      if (transactionsError) {
+        console.error("❌ Transactions query error:", transactionsError)
+        throw new Error(
+          `Transactions query failed: ${transactionsError.message}`
+        )
+      }
+
+      if (pageData && pageData.length > 0) {
+        allTransactions.push(...pageData)
+        hasMoreTransactions = pageData.length === transactionPageSize
+        transactionPage++
+        console.log(
+          `🔍 Fetched page ${transactionPage - 1}, transactions so far: ${allTransactions.length}`
+        )
+      } else {
+        hasMoreTransactions = false
+      }
     }
 
-    if (!transactions || transactions.length === 0) {
+    console.log(
+      "🔍 Total transactions found (after pagination):",
+      allTransactions.length
+    )
+
+    if (allTransactions.length === 0) {
       return {
         orders: [],
         pagination: {
@@ -128,7 +170,8 @@ export async function getIndividualOrders(
     }
 
     // Get unique order IDs from transactions
-    const orderIds = [...new Set(transactions.map((t) => t.order_id))]
+    const orderIds = [...new Set(allTransactions.map((t) => t.order_id))]
+    console.log("🔍 Unique order IDs found:", orderIds.length)
 
     // Get total count for pagination
     const totalCount = orderIds.length
@@ -138,6 +181,11 @@ export async function getIndividualOrders(
     const paginatedOrderIds = orderIds.slice(
       (page - 1) * pageSize,
       page * pageSize
+    )
+    console.log(
+      "🔍 Querying",
+      paginatedOrderIds.length,
+      "orders for current page"
     )
 
     const { data: orders, error: ordersError } = await supabase
@@ -192,8 +240,8 @@ export async function getIndividualOrders(
     }
 
     // Group transactions by order ID
-    const transactionsByOrderId = new Map<number, typeof transactions>()
-    transactions.forEach((transaction) => {
+    const transactionsByOrderId = new Map<number, typeof allTransactions>()
+    allTransactions.forEach((transaction) => {
       if (!transactionsByOrderId.has(transaction.order_id)) {
         transactionsByOrderId.set(transaction.order_id, [])
       }
@@ -206,10 +254,16 @@ export async function getIndividualOrders(
 
       // Calculate transaction metrics
       const salesTransactions = orderTransactions.filter(
-        (t) => t.kind === "sale" && t.status === "success"
+        (t) =>
+          t.status?.toLowerCase() === "success" &&
+          (t.kind?.toLowerCase() === "sale" ||
+            t.kind?.toLowerCase() === "capture")
       )
       const refundTransactions = orderTransactions.filter(
-        (t) => t.kind === "refund" && t.status === "success"
+        (t) =>
+          t.status?.toLowerCase() === "success" &&
+          (t.kind?.toLowerCase() === "refund" ||
+            t.kind?.toLowerCase() === "change")
       )
 
       const total_sales = salesTransactions.reduce(
@@ -232,22 +286,80 @@ export async function getIndividualOrders(
       }
     })
 
-    // Calculate summary metrics
+    // Calculate summary metrics from ALL orders in date range, not just current page
+    // Query orders in chunks to avoid query size limits
+    console.log("🔍 Querying orders for", orderIds.length, "unique order IDs")
+
+    const chunkSize = 1000
+    const allOrdersForSummary = []
+
+    for (let i = 0; i < orderIds.length; i += chunkSize) {
+      const chunk = orderIds.slice(i, i + chunkSize)
+      console.log(
+        `🔍 Querying orders chunk ${Math.floor(i / chunkSize) + 1}, size: ${chunk.length}`
+      )
+
+      const { data: chunkData, error: chunkError } = await supabase
+        .from("orders")
+        .select(
+          `
+          id,
+          currency
+        `
+        )
+        .in("id", chunk)
+        .eq("test", false)
+
+      if (chunkError) {
+        console.error("❌ Orders chunk query error:", chunkError)
+        throw new Error(`Orders chunk query failed: ${chunkError.message}`)
+      }
+
+      if (chunkData) {
+        allOrdersForSummary.push(...chunkData)
+      }
+    }
+
+    // Calculate summary from all transactions in date range
+    console.log("🔍 Total transactions found:", allTransactions.length)
+    console.log("🔍 Sample transactions:", allTransactions.slice(0, 3))
+
+    const allSalesTransactions = allTransactions.filter(
+      (t) =>
+        t.status?.toLowerCase() === "success" &&
+        (t.kind?.toLowerCase() === "sale" ||
+          t.kind?.toLowerCase() === "capture")
+    )
+    const allRefundTransactions = allTransactions.filter(
+      (t) =>
+        t.status?.toLowerCase() === "success" &&
+        (t.kind?.toLowerCase() === "refund" ||
+          t.kind?.toLowerCase() === "change")
+    )
+
+    console.log("🔍 Sales transactions found:", allSalesTransactions.length)
+    console.log("🔍 Refund transactions found:", allRefundTransactions.length)
+    console.log("🔍 Sample sales transaction:", allSalesTransactions[0])
+
+    const totalSalesAmount = allSalesTransactions.reduce(
+      (sum, t) => sum + t.amount,
+      0
+    )
+    const totalRefundsAmount = allRefundTransactions.reduce(
+      (sum, t) => sum + t.amount,
+      0
+    )
+
+    console.log("🔍 Total sales amount:", totalSalesAmount)
+    console.log("🔍 Total refunds amount:", totalRefundsAmount)
+
     const summary = {
-      totalOrders: individualOrders.length,
-      totalSales: individualOrders.reduce(
-        (sum, order) => sum + order.total_sales,
-        0
-      ),
-      totalRefunds: individualOrders.reduce(
-        (sum, order) => sum + order.total_refunds,
-        0
-      ),
-      totalNet: individualOrders.reduce(
-        (sum, order) => sum + order.net_amount,
-        0
-      ),
-      currency: orders[0]?.currency || "USD",
+      totalOrders: orderIds.length, // Total unique orders in date range
+      totalSales: totalSalesAmount,
+      totalRefunds: totalRefundsAmount,
+      totalNet: totalSalesAmount - totalRefundsAmount,
+      currency:
+        allOrdersForSummary[0]?.currency || orders[0]?.currency || "USD",
     }
 
     return {
@@ -267,56 +379,228 @@ export async function getIndividualOrders(
 }
 
 /**
+ * Get ALL individual orders for export (no pagination)
+ * Separate function to ensure we get all orders regardless of count
+ */
+export async function getAllIndividualOrdersForExport(
+  fromDate: string,
+  toDate: string
+): Promise<IndividualOrderData[]> {
+  try {
+    const supabase = await createClient()
+
+    // Adjust toDate to include entire day
+    const toDateEndOfDay = toDate.includes("T")
+      ? toDate
+      : `${toDate}T23:59:59.999Z`
+
+    // Query transactions within date range with pagination to get ALL transactions
+    const transactionPageSize = 1000
+    let transactionPage = 1
+    let hasMoreTransactions = true
+    const allTransactions: Pick<
+      DatabaseTransaction,
+      | "order_id"
+      | "kind"
+      | "status"
+      | "amount"
+      | "currency"
+      | "processed_at"
+      | "created_at"
+      | "gateway"
+      | "id"
+      | "shopify_transaction_id"
+    >[] = []
+
+    while (hasMoreTransactions) {
+      const { data: pageData, error: transactionsError } = await supabase
+        .from("transactions")
+        .select(
+          `
+          order_id,
+          kind,
+          status,
+          amount,
+          currency,
+          processed_at,
+          created_at,
+          gateway,
+          id,
+          shopify_transaction_id
+        `
+        )
+        .gte("processed_at", fromDate)
+        .lte("processed_at", toDateEndOfDay)
+        .order("processed_at", { ascending: false })
+        .range(
+          (transactionPage - 1) * transactionPageSize,
+          transactionPage * transactionPageSize - 1
+        )
+
+      if (transactionsError) {
+        console.error("❌ Transactions query error:", transactionsError)
+        throw new Error(
+          `Transactions query failed: ${transactionsError.message}`
+        )
+      }
+
+      if (pageData && pageData.length > 0) {
+        allTransactions.push(...pageData)
+        hasMoreTransactions = pageData.length === transactionPageSize
+        transactionPage++
+      } else {
+        hasMoreTransactions = false
+      }
+    }
+
+    if (allTransactions.length === 0) {
+      return []
+    }
+
+    // Get ALL unique order IDs from transactions
+    const orderIds = [...new Set(allTransactions.map((t) => t.order_id))]
+
+    // Get ALL orders (no pagination)
+    const { data: orders, error: ordersError } = await supabase
+      .from("orders")
+      .select(
+        `
+        id,
+        shopify_order_id,
+        name,
+        created_at,
+        processed_at,
+        updated_at,
+        financial_status,
+        source_name,
+        channel_id,
+        channel_display_name,
+        subtotal_amount,
+        total_amount,
+        total_tax_amount,
+        total_discounts_amount,
+        total_shipping_amount,
+        currency,
+        test
+      `
+      )
+      .in("id", orderIds)
+      .eq("test", false)
+      .order("processed_at", { ascending: false })
+
+    if (ordersError) {
+      console.error("❌ Orders query error:", ordersError)
+      throw new Error(`Orders query failed: ${ordersError.message}`)
+    }
+
+    if (!orders || orders.length === 0) {
+      return []
+    }
+
+    // Group transactions by order ID
+    const transactionsByOrderId = new Map<number, typeof allTransactions>()
+    allTransactions.forEach((transaction) => {
+      if (!transactionsByOrderId.has(transaction.order_id)) {
+        transactionsByOrderId.set(transaction.order_id, [])
+      }
+      transactionsByOrderId.get(transaction.order_id)!.push(transaction)
+    })
+
+    // Combine orders with their transactions and calculate metrics
+    const individualOrders: IndividualOrderData[] = orders.map((order) => {
+      const orderTransactions = transactionsByOrderId.get(order.id) || []
+
+      // Calculate transaction metrics
+      const salesTransactions = orderTransactions.filter(
+        (t) =>
+          t.status?.toLowerCase() === "success" &&
+          (t.kind?.toLowerCase() === "sale" ||
+            t.kind?.toLowerCase() === "capture")
+      )
+      const refundTransactions = orderTransactions.filter(
+        (t) =>
+          t.status?.toLowerCase() === "success" &&
+          (t.kind?.toLowerCase() === "refund" ||
+            t.kind?.toLowerCase() === "change")
+      )
+
+      const total_sales = salesTransactions.reduce(
+        (sum, t) => sum + t.amount,
+        0
+      )
+      const total_refunds = refundTransactions.reduce(
+        (sum, t) => sum + t.amount,
+        0
+      )
+      const net_amount = total_sales - total_refunds
+
+      return {
+        ...order,
+        transactions: orderTransactions,
+        total_sales,
+        total_refunds,
+        net_amount,
+        transaction_count: orderTransactions.length,
+      }
+    })
+
+    return individualOrders
+  } catch (error) {
+    console.error("❌ Failed to get all individual orders for export:", error)
+    throw error
+  }
+}
+
+/**
  * Generate CSV export data for individual orders
+ * @param orders - Array of individual order data
+ * @returns CSV string content
  */
 export function generateOrdersCSV(orders: IndividualOrderData[]): string {
-  const csvHeaders = [
+  const headers = [
     "Order Name",
     "Shopify Order ID",
-    "Created At",
-    "Processed At",
-    "Updated At",
-    "Financial Status",
+    "Created Date",
+    "Processed Date",
     "Channel",
-    "Channel ID",
-    "Source Name",
-    "Subtotal Amount",
-    "Total Tax",
-    "Total Shipping",
-    "Total Discounts",
+    "Financial Status",
+    "Subtotal",
+    "Tax",
+    "Shipping",
+    "Discounts",
     "Total Amount",
-    "Total Sales (Transactions)",
-    "Total Refunds (Transactions)",
+    "Total Sales",
+    "Total Refunds",
     "Net Amount",
-    "Transaction Count",
     "Currency",
+    "Transaction Count",
     "Test Order",
   ]
 
-  const csvRows = orders.map((order) => [
-    `"${order.name}"`,
-    `"${order.shopify_order_id}"`,
-    `"${new Date(order.created_at).toISOString()}"`,
-    `"${order.processed_at ? new Date(order.processed_at).toISOString() : ""}"`,
-    `"${new Date(order.updated_at).toISOString()}"`,
-    `"${order.financial_status || ""}"`,
-    `"${order.channel_display_name || order.source_name || ""}"`,
-    `"${order.channel_id || ""}"`,
-    `"${order.source_name || ""}"`,
-    order.subtotal_amount,
-    order.total_tax_amount,
-    order.total_shipping_amount,
-    order.total_discounts_amount,
-    order.total_amount,
-    order.total_sales,
-    order.total_refunds,
-    order.net_amount,
-    order.transaction_count,
-    `"${order.currency}"`,
-    order.test ? "TRUE" : "FALSE",
-  ])
+  const csvRows = [
+    headers.join(","),
+    ...orders.map((order) =>
+      [
+        `"${order.name}"`,
+        `"${order.shopify_order_id}"`,
+        `"${new Date(order.created_at).toLocaleString()}"`,
+        `"${order.processed_at ? new Date(order.processed_at).toLocaleString() : "Not processed"}"`,
+        `"${order.channel_display_name || order.source_name || "Unknown"}"`,
+        `"${order.financial_status || "Unknown"}"`,
+        order.subtotal_amount,
+        order.total_tax_amount,
+        order.total_shipping_amount,
+        order.total_discounts_amount,
+        order.total_amount,
+        order.total_sales,
+        order.total_refunds,
+        order.net_amount,
+        `"${order.currency}"`,
+        order.transaction_count,
+        order.test ? "Yes" : "No",
+      ].join(",")
+    ),
+  ]
 
-  return [csvHeaders.join(","), ...csvRows.map((row) => row.join(","))].join(
-    "\n"
-  )
+  return csvRows.join("\n")
 }

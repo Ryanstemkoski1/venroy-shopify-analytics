@@ -32,7 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge"
 
 interface DashboardPageProps {
-  searchParams: { [key: string]: string | string[] | undefined }
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>
 }
 
 async function DashboardMetrics({
@@ -367,9 +367,10 @@ function DashboardSkeleton() {
   )
 }
 
-export default function DashboardPage({ searchParams }: DashboardPageProps) {
+export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+  const resolvedSearchParams = await searchParams
   const searchParamsObj = new URLSearchParams()
-  Object.entries(searchParams).forEach(([key, value]) => {
+  Object.entries(resolvedSearchParams).forEach(([key, value]) => {
     if (value) {
       searchParamsObj.set(key, Array.isArray(value) ? value[0] : value)
     }
