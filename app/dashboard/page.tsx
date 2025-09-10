@@ -367,7 +367,9 @@ function DashboardSkeleton() {
   )
 }
 
-export default async function DashboardPage({ searchParams }: DashboardPageProps) {
+export default async function DashboardPage({
+  searchParams,
+}: DashboardPageProps) {
   const resolvedSearchParams = await searchParams
   const searchParamsObj = new URLSearchParams()
   Object.entries(resolvedSearchParams).forEach(([key, value]) => {

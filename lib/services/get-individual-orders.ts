@@ -137,18 +137,10 @@ export async function getIndividualOrders(
         allTransactions.push(...pageData)
         hasMoreTransactions = pageData.length === transactionPageSize
         transactionPage++
-        console.log(
-          `🔍 Fetched page ${transactionPage - 1}, transactions so far: ${allTransactions.length}`
-        )
       } else {
         hasMoreTransactions = false
       }
     }
-
-    console.log(
-      "🔍 Total transactions found (after pagination):",
-      allTransactions.length
-    )
 
     if (allTransactions.length === 0) {
       return {
@@ -171,7 +163,6 @@ export async function getIndividualOrders(
 
     // Get unique order IDs from transactions
     const orderIds = [...new Set(allTransactions.map((t) => t.order_id))]
-    console.log("🔍 Unique order IDs found:", orderIds.length)
 
     // Get total count for pagination
     const totalCount = orderIds.length
@@ -181,11 +172,6 @@ export async function getIndividualOrders(
     const paginatedOrderIds = orderIds.slice(
       (page - 1) * pageSize,
       page * pageSize
-    )
-    console.log(
-      "🔍 Querying",
-      paginatedOrderIds.length,
-      "orders for current page"
     )
 
     const { data: orders, error: ordersError } = await supabase
@@ -288,16 +274,11 @@ export async function getIndividualOrders(
 
     // Calculate summary metrics from ALL orders in date range, not just current page
     // Query orders in chunks to avoid query size limits
-    console.log("🔍 Querying orders for", orderIds.length, "unique order IDs")
-
     const chunkSize = 1000
     const allOrdersForSummary = []
 
     for (let i = 0; i < orderIds.length; i += chunkSize) {
       const chunk = orderIds.slice(i, i + chunkSize)
-      console.log(
-        `🔍 Querying orders chunk ${Math.floor(i / chunkSize) + 1}, size: ${chunk.length}`
-      )
 
       const { data: chunkData, error: chunkError } = await supabase
         .from("orders")
@@ -321,9 +302,6 @@ export async function getIndividualOrders(
     }
 
     // Calculate summary from all transactions in date range
-    console.log("🔍 Total transactions found:", allTransactions.length)
-    console.log("🔍 Sample transactions:", allTransactions.slice(0, 3))
-
     const allSalesTransactions = allTransactions.filter(
       (t) =>
         t.status?.toLowerCase() === "success" &&
@@ -337,10 +315,6 @@ export async function getIndividualOrders(
           t.kind?.toLowerCase() === "change")
     )
 
-    console.log("🔍 Sales transactions found:", allSalesTransactions.length)
-    console.log("🔍 Refund transactions found:", allRefundTransactions.length)
-    console.log("🔍 Sample sales transaction:", allSalesTransactions[0])
-
     const totalSalesAmount = allSalesTransactions.reduce(
       (sum, t) => sum + t.amount,
       0
@@ -349,9 +323,6 @@ export async function getIndividualOrders(
       (sum, t) => sum + t.amount,
       0
     )
-
-    console.log("🔍 Total sales amount:", totalSalesAmount)
-    console.log("🔍 Total refunds amount:", totalRefundsAmount)
 
     const summary = {
       totalOrders: orderIds.length, // Total unique orders in date range
@@ -460,40 +431,51 @@ export async function getAllIndividualOrdersForExport(
     // Get ALL unique order IDs from transactions
     const orderIds = [...new Set(allTransactions.map((t) => t.order_id))]
 
-    // Get ALL orders (no pagination)
-    const { data: orders, error: ordersError } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,
-        shopify_order_id,
-        name,
-        created_at,
-        processed_at,
-        updated_at,
-        financial_status,
-        source_name,
-        channel_id,
-        channel_display_name,
-        subtotal_amount,
-        total_amount,
-        total_tax_amount,
-        total_discounts_amount,
-        total_shipping_amount,
-        currency,
-        test
-      `
-      )
-      .in("id", orderIds)
-      .eq("test", false)
-      .order("processed_at", { ascending: false })
+    // Get ALL orders with chunking to avoid query size limits
+    const chunkSize = 1000
+    const allOrders = []
 
-    if (ordersError) {
-      console.error("❌ Orders query error:", ordersError)
-      throw new Error(`Orders query failed: ${ordersError.message}`)
+    for (let i = 0; i < orderIds.length; i += chunkSize) {
+      const chunk = orderIds.slice(i, i + chunkSize)
+
+      const { data: chunkData, error: chunkError } = await supabase
+        .from("orders")
+        .select(
+          `
+          id,
+          shopify_order_id,
+          name,
+          created_at,
+          processed_at,
+          updated_at,
+          financial_status,
+          source_name,
+          channel_id,
+          channel_display_name,
+          subtotal_amount,
+          total_amount,
+          total_tax_amount,
+          total_discounts_amount,
+          total_shipping_amount,
+          currency,
+          test
+        `
+        )
+        .in("id", chunk)
+        .eq("test", false)
+        .order("processed_at", { ascending: false })
+
+      if (chunkError) {
+        console.error("❌ Orders chunk query error:", chunkError)
+        throw new Error(`Orders chunk query failed: ${chunkError.message}`)
+      }
+
+      if (chunkData) {
+        allOrders.push(...chunkData)
+      }
     }
 
-    if (!orders || orders.length === 0) {
+    if (allOrders.length === 0) {
       return []
     }
 
@@ -507,7 +489,7 @@ export async function getAllIndividualOrdersForExport(
     })
 
     // Combine orders with their transactions and calculate metrics
-    const individualOrders: IndividualOrderData[] = orders.map((order) => {
+    const individualOrders: IndividualOrderData[] = allOrders.map((order) => {
       const orderTransactions = transactionsByOrderId.get(order.id) || []
 
       // Calculate transaction metrics
